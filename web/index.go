@@ -3,8 +3,11 @@ package boltbrowserweb
 import (
 	"bytes"
 	"fmt"
+	"strings"
+
 	"github.com/boltdb/bolt"
 	"github.com/gin-gonic/gin"
+	"github.com/gofrs/uuid"
 )
 
 var Db *bolt.DB
@@ -69,8 +72,9 @@ func DeleteKey(c *gin.Context) {
 			c.String(200, "error no such bucket | n")
 			return fmt.Errorf("bucket: %s", err)
 		}
+		key := parseKey(c.PostForm("key"))
 
-		err = b.Delete([]byte(c.PostForm("key")))
+		err = b.Delete([]byte(key))
 
 		if err != nil {
 
@@ -99,8 +103,9 @@ func Put(c *gin.Context) {
 			c.String(200, "error  creating bucket | n")
 			return fmt.Errorf("create bucket: %s", err)
 		}
+		key := parseKey(c.PostForm("key"))
 
-		err = b.Put([]byte(c.PostForm("key")), []byte(c.PostForm("value")))
+		err = b.Put([]byte(key), []byte(c.PostForm("value")))
 
 		if err != nil {
 
@@ -126,12 +131,13 @@ func Get(c *gin.Context) {
 	}
 
 	Db.View(func(tx *bolt.Tx) error {
+		key := parseKey(c.PostForm("key"))
 
 		b := tx.Bucket([]byte(c.PostForm("bucket")))
 
 		if b != nil {
 
-			v := b.Get([]byte(c.PostForm("key")))
+			v := b.Get([]byte(key))
 
 			res[0] = "ok"
 			res[1] = string(v)
@@ -170,6 +176,8 @@ func PrefixScan(c *gin.Context) {
 
 	count := 0
 
+	searchText := c.PostForm("text")
+
 	if c.PostForm("key") == "" {
 
 		Db.View(func(tx *bolt.Tx) error {
@@ -177,20 +185,8 @@ func PrefixScan(c *gin.Context) {
 			b := tx.Bucket([]byte(c.PostForm("bucket")))
 
 			if b != nil {
-
-				c := b.Cursor()
-
-				for k, v := c.First(); k != nil; k, v = c.Next() {
-					res.M[string(k)] = string(v)
-
-					if count > 2000 {
-						break
-					}
-					count++
-				}
-
+				res.M = collectValuesFromBucket(b, searchText)
 				res.Result = "ok"
-
 			} else {
 
 				res.Result = "no such bucket available | n"
@@ -208,10 +204,17 @@ func PrefixScan(c *gin.Context) {
 
 			if b != nil {
 
-				prefix := []byte(c.PostForm("key"))
+				prefix := parseKey(c.PostForm("key"))
 
 				for k, v := b.Seek(prefix); bytes.HasPrefix(k, prefix); k, v = b.Next() {
-					res.M[string(k)] = string(v)
+					key := parseDBKey(k)
+
+					value := string(v)
+					if searchText != "" && !strings.Contains(value, searchText) {
+						continue
+					}
+
+					res.M[key] = string(value)
 					if count > 2000 {
 						break
 					}
@@ -233,6 +236,61 @@ func PrefixScan(c *gin.Context) {
 
 	c.JSON(200, res)
 
+}
+
+func collectValuesFromBucket(b *bolt.Bucket, searchText string) map[string]string {
+	c := b.Cursor()
+	res := map[string]string{}
+	var count int
+	for k, v := c.First(); k != nil; k, v = c.Next() {
+		key := parseDBKey(k)
+		value := string(v)
+		b2 := b.Bucket(k)
+		if b2 != nil {
+			subRes := collectValuesFromBucket(b2, searchText)
+			if len(subRes) == 0 && value == "" { // last bucket is used as value by us
+				value = key
+			}
+			for subKey, subVal := range subRes {
+				res[fmt.Sprintf("%v:\n  %v", key, subKey)] = subVal
+			}
+			continue
+		}
+
+		if searchText != "" && !strings.Contains(value, searchText) {
+			continue
+		}
+
+		res[key] = value
+
+		if count > 2000 {
+			break
+		}
+		count++
+	}
+	return res
+}
+
+func parseDBKey(k []byte) string {
+	var key string
+	id, err := uuid.FromBytes(k)
+	if err != nil {
+		key = string(k)
+	} else {
+		key = id.String()
+	}
+	return key
+}
+
+func parseKey(key string) []byte {
+	var prefix []byte
+	id, err := uuid.FromString(key)
+	if err != nil {
+		prefix = []byte(key)
+	} else {
+		prefix = id.Bytes()
+	}
+	return prefix
 }
 
 func Buckets(c *gin.Context) {
