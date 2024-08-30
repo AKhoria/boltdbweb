@@ -31,7 +31,7 @@ COPY --from=builder /app/boltdbweb .
 # Run the binary with environment variables as arguments
 # TODO make args configurable
 # CMD ["sh", "-c", "./boltdbweb -d /data/model-store.db -p 8080"]
-# docker run -p 8080:8080 -v /Users/andrei.khoriakov/src/local/catalogexplorer:/data boltdbweb-app
+# docker run -p 8080:8080 -v /catalogexplorer:/data boltdbweb-app
 # docker build -t boltdbweb-app . --platform linux/amd64
-# docker tag boltdbweb-app gcr.io/rich-access-174020/catalog-explorer:latest
-# docker push gcr.io/rich-access-174020/catalog-explorer:latest       
+# docker tag boltdbweb-app catalog-explorer:latest
+# docker push catalog-explorer:latest       
